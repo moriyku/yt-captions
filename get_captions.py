@@ -4,6 +4,7 @@ import sys
 import subprocess
 import argparse
 import tempfile
+import unicodedata
 
 def clean_captions(text):
     """Remove timestamps, HTML tags, and consecutive duplicate lines."""
@@ -25,8 +26,17 @@ def clean_captions(text):
 
     return "\n".join(cleaned_lines)
 
-def download_captions(url, lang="en", shorten=False, output_dir="."):
-    """Download and clean YouTube captions using a temporary directory."""
+def sanitize_filename(name):
+    """Sanitize filename to avoid unsafe characters, allowing safe Unicode characters."""
+    name = unicodedata.normalize('NFKC', name)
+    name = re.sub(r'[^\w\d\u4E00-\u9FFF._-]', '_', name)  # Allow alphanumeric, CJK, dot, underscore, and hyphen
+    return name.strip("._-")  # Remove leading/trailing dots, underscores, or hyphens
+
+def download_captions(url, lang="en", shorten=False, name=None):
+    """Download and clean YouTube captions, save in ./output."""
+    output_dir = "./output"
+    os.makedirs(output_dir, exist_ok=True)
+
     # Check if yt-dlp is installed
     try:
         subprocess.run(["yt-dlp", "--version"], check=True, stdout=subprocess.DEVNULL)
@@ -34,21 +44,24 @@ def download_captions(url, lang="en", shorten=False, output_dir="."):
         print("Error: yt-dlp is not installed. Please install it using `pip install yt-dlp`.")
         sys.exit(1)
 
-    # Use a temporary directory within the output_dir.
+    # Use a temporary directory within output_dir.
     with tempfile.TemporaryDirectory(dir=output_dir) as temp_dir:
-        # Save current directory and change to temp_dir
         current_dir = os.getcwd()
         os.chdir(temp_dir)
 
-        # Set output options if using short file names
-        output_opts = ["-o", "%(id)s.%(ext)s"] if shorten else []
+        # Set output options based on user input
+        if name:
+            output_opts = ["-o", f"{sanitize_filename(name)}.%(ext)s"]
+        elif shorten:
+            output_opts = ["-o", "%(id)s.%(ext)s"]
+        else:
+            output_opts = []
 
         # Download subtitles
         subprocess.run([
             "yt-dlp", "--write-auto-sub", "--sub-lang", lang, "--skip-download"
         ] + output_opts + [url], check=True)
 
-        # Return to the original directory
         os.chdir(current_dir)
 
         # Process downloaded .vtt files in temp_dir
@@ -63,14 +76,14 @@ def download_captions(url, lang="en", shorten=False, output_dir="."):
                 with open(output_path, "w", encoding="utf-8") as f:
                     f.write(cleaned_text)
 
-    print(f"Captions have been saved to {output_dir}.")
+    print(f"Captions have been saved to {output_path}.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="YouTube Caption Downloader")
     parser.add_argument("url", help="YouTube video URL")
     parser.add_argument("--lang", default="en", help="Caption language (default: en)")
     parser.add_argument("--shorten", action="store_true", help="Use short file names")
-    parser.add_argument("--output", default=".", help="Output directory (default: current directory)")
+    parser.add_argument("--name", help="Custom filename (without extension)")
     args = parser.parse_args()
 
-    download_captions(args.url, args.lang, args.shorten, args.output)
+    download_captions(args.url, args.lang, args.shorten, args.name)
